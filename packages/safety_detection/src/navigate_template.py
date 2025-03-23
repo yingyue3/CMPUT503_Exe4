@@ -15,7 +15,7 @@ from duckietown_msgs.msg import LEDPattern, WheelEncoderStamped
 import cv2 as cv
 from cv_bridge import CvBridge
 import dt_apriltags as aptag
-from std_msgs.msg import Header, ColorRGBA, Int32
+from std_msgs.msg import Header, ColorRGBA, Int32, String
 
 class NavigationControl(DTROS):
     def __init__(self, node_name):
@@ -30,7 +30,7 @@ class NavigationControl(DTROS):
 
         # define other variables as needed
         # controller type
-        self.control_type = "P"  # it can be P or PD or PID
+        self.control_type = "PID"  # it can be P or PD or PID
 
         # variables
         self.image_w = 400
@@ -52,14 +52,14 @@ class NavigationControl(DTROS):
         self.integral = 0
         
         # movement parameters
-        self.speed = 0.35
+        self.speed = 0.4
         # self.speed = 0
         self.error = 0
         
         # distance tracking
         #self.calibration = 130
 
-        self.calibration = 279
+        self.calibration = -181
 
         self.test = []
         
@@ -98,17 +98,18 @@ class NavigationControl(DTROS):
 
         # None lane-following stuff
 
-        self.line_disappear = False
+        # self.line_disappear = False
+        self.red_lane_message = "No"
 
         self._left_encoder_topic = f"/{self._vehicle_name}/left_wheel_encoder_node/tick"
         self._right_encoder_topic = f"/{self._vehicle_name}/right_wheel_encoder_node/tick"
-        self._string_topic = f"/{self._vehicle_name}/control_node/control"
+        self._string_topic = f"/{self._vehicle_name}/control_node/red_lane"
 
         self._ticks_left = 0
         self._ticks_right = 0
         self.sub_left = rospy.Subscriber(self._left_encoder_topic, WheelEncoderStamped, self.callback_left)
         self.sub_right = rospy.Subscriber(self._right_encoder_topic, WheelEncoderStamped, self.callback_right)
-        # self.sub_instruction = rospy.Subscriber(self._string_topic, String, self.callback_string)
+        self.sub_instruction = rospy.Subscriber(self._string_topic, String, self.callback_string)
         self.pub = rospy.Publisher(self.wheels_topic, WheelsCmdStamped, queue_size=1)
         
         # publisher for wheel commands
@@ -122,7 +123,7 @@ class NavigationControl(DTROS):
 
         self._apriltag_topic = f"/{self._vehicle_name}/control_node/apriltag"
         self.sub_april = rospy.Subscriber(self._apriltag_topic, Int32, self.callback_apriltag)
-        self.aprilid = 100000
+        self.aprilid = 1000
     
     def callback_left(self, data):
         self._ticks_left = data.data
@@ -131,7 +132,12 @@ class NavigationControl(DTROS):
         self._ticks_right = data.data
     
     def callback_apriltag(self, data):
-        self.aprilid = data.data
+        aid = data.data
+        # if aid != 1000:
+        #     self.aprilid = aid
+    
+    def callback_string(self, data):
+        self.red_lane_message = data.data
 
     def calculate_p_control(self):
         # add your code here
@@ -217,7 +223,7 @@ class NavigationControl(DTROS):
 
         self.error = avg_x- image.shape[1]/2.0 + self.calibration
 
-        rospy.loginfo(self.error)
+        # rospy.loginfo(self.error)
 
         # Contour approach
 
@@ -263,7 +269,7 @@ class NavigationControl(DTROS):
         # stop = WheelsCmdStamped(vel_left=0, vel_right=0)
         # self.wheel_publisher.publish(stop)
 
-        rospy.loginfo(self.test)
+        # rospy.loginfo(self.test)
 
         message = Twist2DStamped(v=0, omega=0)
         self.twisted_publisher.publish(message)
@@ -302,17 +308,46 @@ class NavigationControl(DTROS):
         # add your code here
         pass
 
+    def start(self):
+        rate = rospy.Rate(10)  # 10 Hz
+
+        while not rospy.is_shutdown():
+            if self.red_lane_message == "No":
+                self.get_control_output()  # Call control function continuously
+            else:
+                self.red_lane_message = "No"
+                rospy.loginfo("Stop")
+                self.stop()
+                if self.aprilid == 50 or self.aprilid == 133:
+                    # T Intersetion Tag
+                    rospy.sleep(2)
+                    self.aprilid == 1000
+                elif self.aprilid == 22 or self.aprilid == 21:
+                    # Stop sign
+                    rospy.sleep(3)
+                    self.aprilid == 1000
+                elif self.aprilid == 93 or self.aprilid == 94:
+                    # U of A sign
+                    rospy.sleep(1)
+                    self.aprilid == 1000
+                else:
+                    rospy.sleep(0.5)
+                self.move_straight()
+            rate.sleep()
+
+
     # add other functions as needed
 
 if __name__ == '__main__':
     node = NavigationControl(node_name='navigation_control_node')
+    # node.start()
     rate = rospy.Rate(10)  # 10 Hz
 
     while not rospy.is_shutdown():
-        if not node.line_disappear:
+        if node.red_lane_message == "No":
             node.get_control_output()  # Call control function continuously
         else:
-            node.line_disappear = True
+            node.red_lane_message = "No"
             rospy.loginfo("Stop")
             node.stop()
             rospy.sleep(2)

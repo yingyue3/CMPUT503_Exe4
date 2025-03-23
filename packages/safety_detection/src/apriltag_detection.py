@@ -13,7 +13,7 @@ from duckietown_msgs.msg import LEDPattern
 import cv2 as cv
 from cv_bridge import CvBridge
 import dt_apriltags as aptag
-from std_msgs.msg import Header, ColorRGBA, Int32
+from std_msgs.msg import Header, ColorRGBA, Int32, String
 
 class ApriltagNode(DTROS):
 
@@ -71,11 +71,15 @@ class ApriltagNode(DTROS):
         self.pub_augmented_image = rospy.Publisher(self._custom_topic_augmented_image , Image) # queue_size=10
 
 
-        self.aprilid = 10000
+        self.aprilid = 1000
         self._custom_topic_apriltag = f"/{self._vehicle_name}/control_node/apriltag"
         self.pub_apriltag = rospy.Publisher(self._custom_topic_apriltag, Int32)
 
         self.gray = None
+
+        self.red_lane_message = "No"
+        self._custom_topic_red_lane = f"/{self._vehicle_name}/control_node/red_lane"
+        self.pub_red_lane = rospy.Publisher(self._custom_topic_red_lane, String)
         # self.publish_augmented_img()
         
     
@@ -149,6 +153,7 @@ class ApriltagNode(DTROS):
             # self.black_detect_image = self.detect_lane(self.disorted_image)
             black_msg = self._bridge.cv2_to_imgmsg(self.color_detect_image, encoding="bgr8")
             self.pub.publish(black_msg)
+            self.pub_red_lane.publish(self.red_lane_message)
 
 
             # April Tag detection code
@@ -231,7 +236,7 @@ class ApriltagNode(DTROS):
         # potentially useful in question 2.1
 
         height = imageFrame.shape[0]
-        imageFrame = imageFrame[height//3:-height//5, :, :]
+        imageFrame = imageFrame[height//2:-height//5, :, :]
 
 
         imageFrame = cv.GaussianBlur(imageFrame, (5, 5), 0)
@@ -258,21 +263,21 @@ class ApriltagNode(DTROS):
         lane_mask = np.zeros_like(white_mask)  
 
         # Set yellow pixels to gray (128)
-        lane_mask[yellow_mask > 0] = 128  
+        # lane_mask[yellow_mask > 0] = 128  
 
         # Set white pixels to white (255)
-        # lane_mask[white_mask > 0] = 255 
+        lane_mask[white_mask > 0] = 255 
 
         return lane_mask
 
     def sign_to_led(self, tag_id):
 
         x = ()
-        if int(tag_id) == 51:
+        if int(tag_id) == 50 or int(tag_id) == 133:
             x = (0.0, 0.0, 1.0, 1.0)
-        elif int(tag_id) == 162:
+        elif int(tag_id) == 22 or int(tag_id) == 21:
             x = (1.0, 0.0, 0.0, 1.0)
-        elif int(tag_id) == 201:
+        elif int(tag_id) == 93 or int(tag_id) == 94:
             x = (0.0, 1.0, 0.0, 1.0)
         else: 
             x = (1.0, 1.0, 1.0, 1.0)
@@ -314,8 +319,8 @@ class ApriltagNode(DTROS):
         results = detector.detect(self.gray)
         # rospy.loginfo(results)
         if len(results) == 0:
-            self.aprilid = 100000
-            self.sign_to_led(1000000)
+            self.aprilid = 1000
+            self.sign_to_led(1000)
             # rospy.loginfo("None")
             return
            
