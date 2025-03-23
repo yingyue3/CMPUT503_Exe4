@@ -13,7 +13,7 @@ from duckietown_msgs.msg import LEDPattern
 import cv2 as cv
 from cv_bridge import CvBridge
 import dt_apriltags as aptag
-from std_msgs.msg import Header, ColorRGBA 
+from std_msgs.msg import Header, ColorRGBA, Int32
 
 class ApriltagNode(DTROS):
 
@@ -21,6 +21,23 @@ class ApriltagNode(DTROS):
         super(ApriltagNode, self).__init__(node_name=node_name, node_type=NodeType.CONTROL)
 
         # add your code here
+        # while bound
+        self.white_lower = np.array([0, 0, 180], np.uint8) 
+        self.white_upper = np.array([180, 40, 255], np.uint8)
+
+        # yellow bound
+        self.yellow_lower = np.array([20, 80, 100], np.uint8) 
+        self.yellow_upper = np.array([40, 255, 255], np.uint8) 
+
+        # Set range for mat
+        self.mat_lower = np.array([20, 40, 40], dtype=np.uint8)   # Lower bound of mat color
+        self.mat_upper = np.array([40, 255, 255], dtype=np.uint8)
+
+        # color detection parameters in HSV format
+        # Set range for red color
+        self.red_lower = np.array([135, 80, 100], np.uint8) 
+        self.red_upper = np.array([190, 255, 255], np.uint8)
+
 
         # call navigation control node
         # static parameters
@@ -39,6 +56,7 @@ class ApriltagNode(DTROS):
         self.disorted_image = None
         self.color_detect_image = None
         self.black_detect_image = None
+        self.imageFrame = None
         self.sub_image = rospy.Subscriber(self._camera_topic, CompressedImage, self.callback_image)
 
         self.led_topic = f"/{self._vehicle_name}/led_emitter_node/led_pattern"
@@ -52,9 +70,13 @@ class ApriltagNode(DTROS):
         self._custom_topic_augmented_image = f"/{self._vehicle_name}/custom_node/image/black"
         self.pub_augmented_image = rospy.Publisher(self._custom_topic_augmented_image , Image) # queue_size=10
 
-        self.gray = None
-        self.publish_augmented_img()
 
+        self.aprilid = 10000
+        self._custom_topic_apriltag = f"/{self._vehicle_name}/control_node/apriltag"
+        self.pub_apriltag = rospy.Publisher(self._custom_topic_apriltag, Int32)
+
+        self.gray = None
+        # self.publish_augmented_img()
         
     
     def callback_info(self, msg):
@@ -66,22 +88,82 @@ class ApriltagNode(DTROS):
         self.D = np.array(msg.D)
         rate.sleep()
 
+    # def callback_image(self, msg):
+    #     # add your code here
+        
+    #     # convert compressed image to CV2
+    #     # rate = rospy.Rate(30)
+    #     start = rospy.Time.now()
+    #     if self.K is None:
+    #         return
+    #     image = self._bridge.compressed_imgmsg_to_cv2(msg)
+    #     # undistort image
+    #     dst = self.undistort_image(image)
+    #     # preprocess image
+    #     self.disorted_image = dst
+    #     imageFrame = self.preprocess_image(dst).astype(np.uint8)
+    #     # detect lanes - 2.1 
+
+    #     # publish lane detection results
+        
+    #     # detect lanes and colors - 1.3
+    #     # publish undistorted image
+    #     # self.color_detect_image = self.detect_red_lane(cv.blur(imageFrame, (5, 5)))
+    #     self.color_detect_image = self.detect_red_lane(imageFrame)
+    #     # self.black_detect_image = self.detect_lane(self.disorted_image)
+    #     black_msg = self._bridge.cv2_to_imgmsg(self.color_detect_image, encoding="bgr8")
+    #     self.pub.publish(black_msg)
+    #     self.process_image()
+    #     self.detect_tag()
+    #     end = rospy.Time.now()
+    #     rospy.loginfo("Detection time: %f sec", (end - start).to_sec())
+
     def callback_image(self, msg):
         # add your code here
         
         # convert compressed image to CV2
-        rate = rospy.Rate(3)
+        # rate = rospy.Rate(30)
+        # start = rospy.Time.now()
         if self.K is None:
             return
         image = self._bridge.compressed_imgmsg_to_cv2(msg)
         # undistort image
         dst = self.undistort_image(image)
         # preprocess image
-        imageFrame = self.preprocess_image(dst).astype(np.uint8)
-        self.disorted_image = imageFrame
-        self.process_image()
-        self.detect_tag()
+        self.disorted_image = dst
+        self.imageFrame = self.preprocess_image(dst).astype(np.uint8)
+        # detect lanes - 2.1 
 
+        # end = rospy.Time.now()
+        # rospy.loginfo("Detection time: %f sec", (end - start).to_sec())
+    
+    def start(self):
+        rate = rospy.Rate(20)
+        while not rospy.is_shutdown():
+            if self.imageFrame is None:
+                continue
+            # start = rospy.Time.now()
+
+            # Red line detection code
+            self.color_detect_image = self.detect_red_lane(self.imageFrame)
+            # self.black_detect_image = self.detect_lane(self.disorted_image)
+            black_msg = self._bridge.cv2_to_imgmsg(self.color_detect_image, encoding="bgr8")
+            self.pub.publish(black_msg)
+
+
+            # April Tag detection code
+            # self.process_image()
+            # self.detect_tag()
+            # self.pub_apriltag.publish(self.aprilid)
+
+            # PID control stuff
+            self.black_detect_image = self.detect_lane(cv.blur(self.disorted_image, (5, 5)))
+            black_msg = self._bridge.cv2_to_imgmsg(self.black_detect_image, encoding="8UC1")
+            self.pub_augmented_image.publish(black_msg)
+            # image_msg = self._bridge.cv2_to_imgmsg(self.gray, encoding="8UC1")
+            # self.pub_augmented_image.publish(image_msg)
+            # end = rospy.Time.now()
+            # rospy.loginfo("Publish time: %f sec", (end - start).to_sec())
 
     def undistort_image(self, image):
         # convert JPEG bytes to CV image
@@ -99,11 +181,89 @@ class ApriltagNode(DTROS):
         # rate.sleep()
     
     def preprocess_image(self, raw_image):
-        new_width = 400
-        new_height = 300
-        resized_image = cv.resize(raw_image, (new_width, new_height), interpolation = cv.INTER_AREA)
+        # height = raw_image.shape[0]
+        # weight = raw_image.shape[1]
+        # rospy.loginfo(height//3)
+        # rospy.loginfo(weight//3)
+        resized_image = raw_image[339:339+100, 302:302+100]
+        # new_width = 400
+        # new_height = 300
+        # resized_image = cv.resize(raw_image, (new_width, new_height), interpolation = cv.INTER_AREA)
         blurred_image = cv.blur(resized_image, (5, 5)) 
-        return blurred_image
+        return resized_image
+    
+    def detect_red_lane(self, imageFrame):
+        hsvFrame = cv.cvtColor(imageFrame, cv.COLOR_BGR2HSV)
+        # red mask
+        # rospy.loginfo("line detecting")
+        mask = cv.inRange(hsvFrame, self.red_lower, self.red_upper) 
+
+        kernel = np.ones((5, 5), "uint8") 
+        mask = cv.dilate(mask, kernel) 
+        res = cv.bitwise_and(imageFrame, imageFrame, 
+                                mask = mask) 
+        contours, hierarchy = cv.findContours(mask, 
+                                            cv.RETR_TREE, 
+                                            cv.CHAIN_APPROX_SIMPLE)
+        red_lane = False
+        for pic, contour in enumerate(contours): 
+            area = cv.contourArea(contour) 
+            if(area > 100): 
+                x, y, w, h = cv.boundingRect(contour) 
+                # rospy.loginfo(y+h)
+                # imageFrame = cv.rectangle(imageFrame, (x, y), 
+                #                         (x + w, y + h), 
+                #                         (0, 0, 255), 2) 
+                
+                # cv.putText(imageFrame, "Colour", (x, y), 
+                #             cv.FONT_HERSHEY_SIMPLEX, 1.0, 
+                #             (0, 0, 255))
+                red_lane = True
+        if red_lane:
+            self.red_lane_message = "Yes"
+        else:
+            self.red_lane_message = "No"
+        return imageFrame
+
+    
+    def detect_lane(self, imageFrame):
+        # add your code here
+        # potentially useful in question 2.1
+
+        height = imageFrame.shape[0]
+        imageFrame = imageFrame[height//3:-height//5, :, :]
+
+
+        imageFrame = cv.GaussianBlur(imageFrame, (5, 5), 0)
+
+        kernel = np.ones((5, 5), "uint8") 
+
+        hsvFrame = cv.cvtColor(imageFrame, cv.COLOR_BGR2HSV)
+
+        white_mask = cv.inRange(hsvFrame, self.white_lower, self.white_upper) 
+        yellow_mask = cv.inRange(hsvFrame, self.yellow_lower, self.yellow_upper) 
+        mat_mask = cv.inRange(hsvFrame, self.mat_lower, self.mat_upper)
+
+        # For white color 
+        white_mask = cv.dilate(white_mask, kernel) 
+        res_white = cv.bitwise_and(imageFrame, imageFrame, 
+                                mask = white_mask) 
+        
+        # For yellow color 
+        yellow_mask = cv.dilate(yellow_mask, kernel) 
+        res_yellow = cv.bitwise_and(imageFrame, imageFrame, 
+                                mask = yellow_mask) 
+
+
+        lane_mask = np.zeros_like(white_mask)  
+
+        # Set yellow pixels to gray (128)
+        lane_mask[yellow_mask > 0] = 128  
+
+        # Set white pixels to white (255)
+        # lane_mask[white_mask > 0] = 255 
+
+        return lane_mask
 
     def sign_to_led(self, tag_id):
 
@@ -152,6 +312,12 @@ class ApriltagNode(DTROS):
     def detect_tag(self):
         detector = aptag.Detector(families="tag36h11")
         results = detector.detect(self.gray)
+        # rospy.loginfo(results)
+        if len(results) == 0:
+            self.aprilid = 100000
+            self.sign_to_led(1000000)
+            # rospy.loginfo("None")
+            return
            
         def area(r):
             # Use corners to compute polygon area
@@ -171,17 +337,19 @@ class ApriltagNode(DTROS):
         ptD = (int(ptD[0]), int(ptD[1]))
 
         # Draw bounding box
-        cv.line(self.gray, ptA, ptB, (0, 255, 0), 2)
-        cv.line(self.gray, ptB, ptC, (0, 255, 0), 2)
-        cv.line(self.gray, ptC, ptD, (0, 255, 0), 2)
-        cv.line(self.gray, ptD, ptA, (0, 255, 0), 2)
+        # cv.line(self.gray, ptA, ptB, (0, 255, 0), 2)
+        # cv.line(self.gray, ptB, ptC, (0, 255, 0), 2)
+        # cv.line(self.gray, ptC, ptD, (0, 255, 0), 2)
+        # cv.line(self.gray, ptD, ptA, (0, 255, 0), 2)
 
         # Draw tag ID at center
         (cX, cY) = (int(largest_tag.center[0]), int(largest_tag.center[1]))
         tag_id = str(largest_tag.tag_id)
-        cv.putText(self.gray, tag_id, (cX - 10, cY + 10), cv.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+        # cv.putText(self.gray, tag_id, (cX - 10, cY + 10), cv.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+        # rospy.loginfo(tag_id)
 
         self.sign_to_led(tag_id)
+        self.aprilid = int(tag_id)
         
 
         return 
@@ -190,5 +358,7 @@ class ApriltagNode(DTROS):
 if __name__ == '__main__':
     # create the node
     node = ApriltagNode(node_name='apriltag_detector_node')
+    node.start()
+
     rospy.spin()
     
