@@ -101,14 +101,10 @@ class NavigationControl(DTROS):
         # self.line_disappear = False
         self.red_lane_message = "No"
 
-        self._left_encoder_topic = f"/{self._vehicle_name}/left_wheel_encoder_node/tick"
-        self._right_encoder_topic = f"/{self._vehicle_name}/right_wheel_encoder_node/tick"
         self._string_topic = f"/{self._vehicle_name}/control_node/red_lane"
 
         self._ticks_left = 0
         self._ticks_right = 0
-        self.sub_left = rospy.Subscriber(self._left_encoder_topic, WheelEncoderStamped, self.callback_left)
-        self.sub_right = rospy.Subscriber(self._right_encoder_topic, WheelEncoderStamped, self.callback_right)
         self.sub_instruction = rospy.Subscriber(self._string_topic, String, self.callback_string)
         self.pub = rospy.Publisher(self.wheels_topic, WheelsCmdStamped, queue_size=1)
         
@@ -124,17 +120,43 @@ class NavigationControl(DTROS):
         self._apriltag_topic = f"/{self._vehicle_name}/control_node/apriltag"
         self.sub_april = rospy.Subscriber(self._apriltag_topic, Int32, self.callback_apriltag)
         self.aprilid = 1000
-    
-    def callback_left(self, data):
-        self._ticks_left = data.data
 
-    def callback_right(self, data):
-        self._ticks_right = data.data
+        # self.gray_topic = f"/{self._vehicle_name}/custom_node/image/gray"
+        # self.lane_sub = rospy.Subscriber(self.gray_topic, Image, self.callback_image)
+
+        self.led_topic = f"/{self._vehicle_name}/led_emitter_node/led_pattern"
+        self.led_pub = rospy.Publisher(self.led_topic, LEDPattern, queue_size=1)
+
+        self._tag_topic = f"/{self._vehicle_name}/control_node/tag"
+        self.sub_instruction = rospy.Subscriber(self._tag_topic, String, self.tag_callback)
+
+        self.tag_id = 1000
+
+        
+        self.gray = None
+        self.x = (1.0, 1.0, 1.0, 1.0)
+        self.prev_x = (1.0, 1.0, 1.0, 1.0)
+
+    def callback_image(self, image):
+        # add your code here
+        
+        self.gray = self._bridge.imgmsg_to_cv2(image) 
+        # h,w = self.gray.shape
+
+        # self.gray = self.gray[h//4:-h//4,w//2:]
+
+        self.detect_tag()
+    
+   
     
     def callback_apriltag(self, data):
         aid = data.data
         # if aid != 1000:
         #     self.aprilid = aid
+    def tag_callback(self, msg):
+        self.tag_id = msg.data
+        self.sign_to_led()
+
     
     def callback_string(self, data):
         self.red_lane_message = data.data
@@ -156,14 +178,7 @@ class NavigationControl(DTROS):
         derivative = self.error - self.prev_error 
         return self.proportional_gain * self.error + self.derivative_gain * derivative + self.integral_gain * self.integral
     
-    def compute_distance_traveled(self, ticks):
-        # left_distance = self._ticks_left* self.DISTANCE_PER_TICK
-        # right_distance = self._ticks_right* self.DISTANCE_PER_TICK
-        # dist = []
-        # dist.append(left_distance)
-        # dist.append(right_distance)
-        distance = ticks* self.DISTANCE_PER_TICK
-        return distance
+   
     
     def get_control_output(self):
         if self.control_type == "P":
@@ -182,15 +197,6 @@ class NavigationControl(DTROS):
         return control
     
     def publish_cmd(self, control):
-        # msg = WheelsCmdStamped()
-        # msg.vel_left = self.speed + control
-        # msg.vel_right = self.speed - control
-        # self.wheel_publisher.publish(msg)
-
-        #rospy.loginfo("Control: " + str(control))
-        #rospy.loginfo("Error: " + str(self.error))
-
-        self.test.append(control)
         message = Twist2DStamped(v=self.speed, omega= -1 * control)
         self.twisted_publisher.publish(message)
 
@@ -223,9 +229,7 @@ class NavigationControl(DTROS):
 
         self.error = avg_x- image.shape[1]/2.0 + self.calibration
 
-        # rospy.loginfo(self.error)
-
-        # Contour approach
+        
 
         return image
     
@@ -273,66 +277,72 @@ class NavigationControl(DTROS):
 
         message = Twist2DStamped(v=0, omega=0)
         self.twisted_publisher.publish(message)
+        self.x = (1.0, 1.0, 1.0, 1.0)
+        self.publish_leds()
         
-    def publish_velocity(self, **kwargs):
-        # add your code here
-        pass
-        
-    def stop(self, **kwargs):
-        # add your code here
-        msg = WheelsCmdStamped()
-        msg.vel_left = 0
-        msg.vel_right = 0
-        self.pub.publish(msg)
-        
-    def move_straight(self,  speed=0.5, direction=1, distance=0.3, calibrate = 1.3):
-        msg = WheelsCmdStamped()
-        msg.vel_left = speed * direction * 1.3
-        msg.vel_right = speed * direction
+    def sign_to_led(self):
 
-        self.start_dist = self.compute_distance_traveled(self._ticks_left)
-
-        while np.abs(self.start_dist - self.compute_distance_traveled(self._ticks_left)) < distance and not rospy.is_shutdown():
-            self.pub.publish(msg)
-
-        msg.vel_left = 0
-        msg.vel_right = 0
-        self.pub.publish(msg)
-        pass
         
-    def turn_right(self, **kwargs):
+        if int(self.tag_id) == 50 or int(self.tag_id) == 133:
+            self.x = (0.0, 0.0, 1.0, 1.0)
+        elif int(self.tag_id) == 22 or int(self.tag_id) == 21:
+            self.x = (1.0, 0.0, 0.0, 1.0)
+        elif int(self.tag_id) == 93 or int(self.tag_id) == 94:
+            self.x = (0.0, 1.0, 0.0, 1.0)
+        
+        return 
+
+
+    def publish_leds(self):    
+        msg = LEDPattern()
+        msg.header = Header()
+        msg.header.stamp = rospy.Time.now()
+        color_msg = ColorRGBA()
+        color_msg.r, color_msg.g, color_msg.b, color_msg.a = self.x
+
+
+        # Set LED colors
+        msg.rgb_vals = [color_msg] * 5
+        self.led_pub.publish(msg) 
+        return
         # add your code here
         pass
-        
-    def turn_left(self, **kwargs):
-        # add your code here
-        pass
+
+    def stop(self):
+        message = Twist2DStamped(v=0, omega= 0)
+        self.twisted_publisher.publish(message)
+
 
     def start(self):
         rate = rospy.Rate(10)  # 10 Hz
 
         while not rospy.is_shutdown():
+            # if self.prev_x != self.x:
+            #     self.publish_leds()
+            #     self.prev_x = self.x
+            rospy.loginfo(self.tag_id)
             if self.red_lane_message == "No":
                 self.get_control_output()  # Call control function continuously
             else:
                 self.red_lane_message = "No"
-                rospy.loginfo("Stop")
+                
                 self.stop()
-                if self.aprilid == 50 or self.aprilid == 133:
+                if self.tag_id == 50 or self.tag_id == 133:
                     # T Intersetion Tag
-                    rospy.sleep(2)
-                    self.aprilid == 1000
-                elif self.aprilid == 22 or self.aprilid == 21:
+                    rospy.sleep(4)
+                    self.tag_id == 1000
+                elif self.tag_id == 22 or self.tag_id == 21:
                     # Stop sign
-                    rospy.sleep(3)
-                    self.aprilid == 1000
-                elif self.aprilid == 93 or self.aprilid == 94:
+                    rospy.sleep(6)
+                    self.tag_id == 1000
+                elif self.tag_id == 93 or self.tag_id== 94:
                     # U of A sign
                     rospy.sleep(1)
-                    self.aprilid == 1000
+                    self.tag_id== 1000
                 else:
                     rospy.sleep(0.5)
-                self.move_straight()
+                for i in range(20):
+                    self.get_control_output()
             rate.sleep()
 
 
@@ -340,18 +350,5 @@ class NavigationControl(DTROS):
 
 if __name__ == '__main__':
     node = NavigationControl(node_name='navigation_control_node')
-    # node.start()
-    rate = rospy.Rate(10)  # 10 Hz
-
-    while not rospy.is_shutdown():
-        if node.red_lane_message == "No":
-            node.get_control_output()  # Call control function continuously
-        else:
-            node.red_lane_message = "No"
-            rospy.loginfo("Stop")
-            node.stop()
-            rospy.sleep(2)
-            node.move_straight()
-
-        rate.sleep()
+    node.start()
     rospy.spin()
