@@ -154,7 +154,7 @@ class NavigationControl(DTROS):
         # if aid != 1000:
         #     self.aprilid = aid
     def tag_callback(self, msg):
-        self.tag_id = msg.data
+        self.tag_id = int(msg.data)
         self.sign_to_led()
 
     

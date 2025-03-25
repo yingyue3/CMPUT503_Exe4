@@ -53,18 +53,18 @@ class LaneDetectionNode(DTROS):
         self.sub_image = rospy.Subscriber(self._camera_topic, CompressedImage, self.callback_image)
 
 
-        # self._custom_topic_augmented_image = f"/{self._vehicle_name}/custom_node/image/gray"
-        # self.pub_augmented_image = rospy.Publisher(self._custom_topic_augmented_image , Image, queue_size=1)
+        self._custom_topic_augmented_image = f"/{self._vehicle_name}/custom_node/image/gray"
+        self.pub_augmented_image = rospy.Publisher(self._custom_topic_augmented_image , Image, queue_size=1)
 
         self._custom_topic_black = f"/{self._vehicle_name}/custom_node/image/black"
         self.pub_black = rospy.Publisher(self._custom_topic_black , Image, queue_size=1)
 
         self.red_lane_message = "No"
         self._custom_topic_red_lane = f"/{self._vehicle_name}/control_node/red_lane"
-        self.pub_red_lane = rospy.Publisher(self._custom_topic_red_lane, String)
+        self.pub_red_lane = rospy.Publisher(self._custom_topic_red_lane, String, queue_size = 1)
 
         self._custom_tag= f"/{self._vehicle_name}/control_node/tag"
-        self.pub_tag = rospy.Publisher(self._custom_tag, String)
+        self.pub_tag = rospy.Publisher(self._custom_tag, String, queue_size = 1)
         self.x = (1.0, 1.0, 1.0, 1.0)
         self.prev_x = (1.0, 1.0, 1.0, 1.0)
 
@@ -120,7 +120,7 @@ class LaneDetectionNode(DTROS):
         self.imageFrame = self.preprocess_image(dst).astype(np.uint8)
 
     def start(self):
-        rate = rospy.Rate(10)
+        rate = rospy.Rate(3)
         while not rospy.is_shutdown():
             if self.imageFrame is None:
                 continue
@@ -209,13 +209,13 @@ class LaneDetectionNode(DTROS):
         self.detect_tag()
         self.tag_msg = self.tag_id
         self.pub_tag.publish(str(self.tag_msg))
-        rospy.loginfo(self.tag_id)
+        # rospy.loginfo(self.tag_id)
         pass
 
     def publish_augmented_img(self):   
-        if self.black_detect_image is not None:
-            # image_msg = self._bridge.cv2_to_imgmsg(self.gray, encoding="8UC1")
-            # self.pub_augmented_image.publish(image_msg)
+        if self.gray is not None and self.black_detect_image is not None:
+            image_msg = self._bridge.cv2_to_imgmsg(self.gray, encoding="8UC1")
+            self.pub_augmented_image.publish(image_msg)
 
             black_msg = self._bridge.cv2_to_imgmsg(self.black_detect_image, encoding="8UC1")
             self.pub_black.publish(black_msg)
@@ -254,22 +254,22 @@ class LaneDetectionNode(DTROS):
                 largest_tag = results[0]
 
             # Extract corners
-            # (ptA, ptB, ptC, ptD) = largest_tag.corners
-            # ptA = (int(ptA[0]), int(ptA[1]))
-            # ptB = (int(ptB[0]), int(ptB[1]))
-            # ptC = (int(ptC[0]), int(ptC[1]))
-            # ptD = (int(ptD[0]), int(ptD[1]))
+            (ptA, ptB, ptC, ptD) = largest_tag.corners
+            ptA = (int(ptA[0]), int(ptA[1]))
+            ptB = (int(ptB[0]), int(ptB[1]))
+            ptC = (int(ptC[0]), int(ptC[1]))
+            ptD = (int(ptD[0]), int(ptD[1]))
 
             # Draw bounding box
-            # cv.line(self.gray, ptA, ptB, (0, 255, 0), 2)
-            # cv.line(self.gray, ptB, ptC, (0, 255, 0), 2)
-            # cv.line(self.gray, ptC, ptD, (0, 255, 0), 2)
-            # cv.line(self.gray, ptD, ptA, (0, 255, 0), 2)
+            cv.line(self.gray, ptA, ptB, (0, 255, 0), 2)
+            cv.line(self.gray, ptB, ptC, (0, 255, 0), 2)
+            cv.line(self.gray, ptC, ptD, (0, 255, 0), 2)
+            cv.line(self.gray, ptD, ptA, (0, 255, 0), 2)
 
             # # Draw tag ID at center
-            # (cX, cY) = (int(largest_tag.center[0]), int(largest_tag.center[1]))
+            (cX, cY) = (int(largest_tag.center[0]), int(largest_tag.center[1]))
             self.tag_id = str(largest_tag.tag_id)
-            # cv.putText(self.gray, tag_id, (cX - 10, cY + 10), cv.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+            cv.putText(self.gray, self.tag_id, (cX - 10, cY + 10), cv.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
             # rospy.loginfo(tag_id)
         
         return 
