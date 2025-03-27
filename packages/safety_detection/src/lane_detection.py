@@ -71,6 +71,8 @@ class LaneDetectionNode(DTROS):
         self.tag_id =1000
 
         self.tag_msg = self.tag_id
+        self.image = None
+        self.gray = None
 
         
 
@@ -88,7 +90,7 @@ class LaneDetectionNode(DTROS):
         red_lane = False
         for pic, contour in enumerate(contours): 
             area = cv.contourArea(contour) 
-            if(area > 90 and area < 120): 
+            if(area > 110): 
                 x, y, w, h = cv.boundingRect(contour) 
                 red_lane = True
         if red_lane:
@@ -99,41 +101,42 @@ class LaneDetectionNode(DTROS):
 
        
     def callback_info(self, msg):
-        rate = rospy.Rate(1)
         # https://stackoverflow.com/questions/55781120/subscribe-ros-image-and-camerainfo-sensor-msgs-format
         # http://docs.ros.org/en/noetic/api/sensor_msgs/html/msg/CameraInfo.html
         # https://github.com/IntelRealSense/realsense-ros/issues/709ss
         self.K = np.array(msg.K).reshape(3, 3)
         self.D = np.array(msg.D)
-        rate.sleep()
+        
 
     def callback_image(self, msg):
         # add your code here
         
         if self.K is None:
             return
-        image = self._bridge.compressed_imgmsg_to_cv2(msg)
+        self.image = self._bridge.compressed_imgmsg_to_cv2(msg)
         # undistort image
-        dst = self.undistort_image(image)
+        dst = self.undistort_image(self.image)
         # preprocess image
         self.disorted_image = dst
         self.imageFrame = self.preprocess_image(dst).astype(np.uint8)
 
     def start(self):
-        rate = rospy.Rate(3)
+        rate = rospy.Rate(10)
         while not rospy.is_shutdown():
-            if self.imageFrame is None:
+            if self.imageFrame is None or self.disorted_image is None:
                 continue
 
 
             self.color_detect_image = self.detect_red_lane(self.imageFrame)
 
             # April Tag detection code
-            self.process_image()
+            
             
             # PID control stuff
-            if self.disorted_image is not None:
-                self.black_detect_image = self.detect_lane(cv.blur(self.disorted_image, (5, 5)))
+           
+            self.black_detect_image = self.detect_lane(cv.blur(self.disorted_image, (5, 5)))
+
+            self.process_image()
             # black_msg = self._bridge.cv2_to_imgmsg(self.black_detect_image, encoding="8UC1")
             # self.pub_augmented_image.publish(black_msg)
             # image_msg = self._bridge.cv2_to_imgmsg(self.gray, encoding="8UC1")
@@ -203,13 +206,14 @@ class LaneDetectionNode(DTROS):
    
 
     def process_image(self):
-        self.gray = cv.cvtColor(self.disorted_image, cv.COLOR_BGR2GRAY)
-        h, w = self.gray.shape
-        self.gray = self.gray[h//4: -h//4, w//2:]
-        self.detect_tag()
-        self.tag_msg = self.tag_id
-        self.pub_tag.publish(str(self.tag_msg))
-        # rospy.loginfo(self.tag_id)
+        if self.image is not None:
+            self.gray = cv.cvtColor(self.image, cv.COLOR_BGR2GRAY)
+            h, w = self.gray.shape
+            self.gray = self.gray[h//4: -h//4, w//2:]
+            self.detect_tag()
+            self.tag_msg = self.tag_id
+            self.pub_tag.publish(str(self.tag_msg))
+            # rospy.loginfo(self.tag_id)
         pass
 
     def publish_augmented_img(self):   

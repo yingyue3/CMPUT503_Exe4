@@ -16,6 +16,7 @@ import cv2 as cv
 from cv_bridge import CvBridge
 import dt_apriltags as aptag
 from std_msgs.msg import Header, ColorRGBA, Int32, String
+import time
 
 class NavigationControl(DTROS):
     def __init__(self, node_name):
@@ -137,6 +138,8 @@ class NavigationControl(DTROS):
         self.x = (1.0, 1.0, 1.0, 1.0)
         self.prev_x = (1.0, 1.0, 1.0, 1.0)
 
+        self.last_seen_sign = np.ones((1,400))*1000
+
     def callback_image(self, image):
         # add your code here
         
@@ -155,6 +158,8 @@ class NavigationControl(DTROS):
         #     self.aprilid = aid
     def tag_callback(self, msg):
         self.tag_id = int(msg.data)
+        self.last_seen_sign= np.roll(self.last_seen_sign, shift=-1, axis=1)  # Shift all values left
+        self.last_seen_sign[0, -1] = self.tag_id
         self.sign_to_led()
 
     
@@ -254,7 +259,7 @@ class NavigationControl(DTROS):
 
         for pic, contour in enumerate(contours): 
             area = cv.contourArea(contour) 
-            if(area > 100): 
+            if(area == 110): 
                 x, y, w, h = cv.boundingRect(contour) 
                 rospy.loginfo(y+h)
                 # imageFrame = cv.rectangle(imageFrame, (x, y), 
@@ -283,12 +288,14 @@ class NavigationControl(DTROS):
     def sign_to_led(self):
 
         
-        if int(self.tag_id) == 50 or int(self.tag_id) == 133:
+        if int(self.tag_id) == 50 or int(self.tag_id) == 133 or int(self.tag_id) == 15:
             self.x = (0.0, 0.0, 1.0, 1.0)
         elif int(self.tag_id) == 22 or int(self.tag_id) == 21:
             self.x = (1.0, 0.0, 0.0, 1.0)
         elif int(self.tag_id) == 93 or int(self.tag_id) == 94:
             self.x = (0.0, 1.0, 0.0, 1.0)
+        else: 
+            self.x = (1.0, 1.0, 1.0, 1.0)
         
         return 
 
@@ -316,33 +323,42 @@ class NavigationControl(DTROS):
     def start(self):
         rate = rospy.Rate(10)  # 10 Hz
 
+        last_detected = time.time()
         while not rospy.is_shutdown():
-            # if self.prev_x != self.x:
-            #     self.publish_leds()
-            #     self.prev_x = self.x
-            rospy.loginfo(self.tag_id)
+            if self.prev_x != self.x:
+                self.publish_leds()
+                self.prev_x = self.x
+            # rospy.loginfo(self.tag_id)
             if self.red_lane_message == "No":
                 self.get_control_output()  # Call control function continuously
             else:
                 self.red_lane_message = "No"
+
                 
+
+                    
                 self.stop()
-                if self.tag_id == 50 or self.tag_id == 133:
+                last_detected = time.time()
+                if int(np.min(self.last_seen_sign)) == 50 or int(np.min(self.last_seen_sign)) == 133 or int(np.min(self.last_seen_sign)) == 15:
                     # T Intersetion Tag
-                    rospy.sleep(4)
+                    rospy.sleep(2)
                     self.tag_id == 1000
-                elif self.tag_id == 22 or self.tag_id == 21:
+                elif int(np.min(self.last_seen_sign)) == 22 or int(np.min(self.last_seen_sign)) == 21:
                     # Stop sign
-                    rospy.sleep(6)
+                    rospy.sleep(3)
                     self.tag_id == 1000
-                elif self.tag_id == 93 or self.tag_id== 94:
+                elif int(np.min(self.last_seen_sign)) == 93 or int(np.min(self.last_seen_sign)) == 94:
                     # U of A sign
                     rospy.sleep(1)
                     self.tag_id== 1000
                 else:
                     rospy.sleep(0.5)
-                for i in range(20):
+
+                for i in range(10000):
                     self.get_control_output()
+                self.red_lane_message = "No"
+                    
+                   
             rate.sleep()
 
 
