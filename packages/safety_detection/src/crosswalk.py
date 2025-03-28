@@ -483,20 +483,20 @@ class CrossWalkNode(DTROS):
             # self.black_detect_image = self.detect_lane(self.disorted_image)
             # black_msg = self._bridge.cv2_to_imgmsg(self.color_detect_image, encoding="bgr8")
             # self.pub.publish(black_msg)
-            if self.blue_lane:
-                rospy.loginfo("Blue lane detected")
+            # if self.blue_lane:
+            #     rospy.loginfo("Blue lane detected")
 
             # Ducks detection code
             self.duck_detect_image = self.detect_ducks(self.imageFrame)
-            black_msg = self._bridge.cv2_to_imgmsg(self.duck_detect_image, encoding="bgr8")
-            self.pub.publish(black_msg)
-            if self.ducks:
-                rospy.loginfo("Ducks detected")
+            # black_msg = self._bridge.cv2_to_imgmsg(self.duck_detect_image, encoding="bgr8")
+            # self.pub.publish(black_msg)
+            # if self.ducks:
+            #     rospy.loginfo("Ducks detected")
 
             # PID control stuff
             self.black_detect_image = self.detect_lane(cv.blur(self.disorted_image, (5, 5)))
-            black_msg = self._bridge.cv2_to_imgmsg(self.black_detect_image, encoding="8UC1")
-            self.pub_augmented_image.publish(black_msg)
+            # black_msg = self._bridge.cv2_to_imgmsg(self.black_detect_image, encoding="8UC1")
+            # self.pub_augmented_image.publish(black_msg)
             # image_msg = self._bridge.cv2_to_imgmsg(self.gray, encoding="8UC1")
             # self.pub_augmented_image.publish(image_msg)
             # end = rospy.Time.now()
@@ -505,12 +505,16 @@ class CrossWalkNode(DTROS):
             # Motion Control
             if not self.blue_lane:
                 self.get_control_output()  # Call control function continuously
+                rospy.loginfo("Continue, Blue lane = False")
             else:
                 self.stop()
+                rospy.loginfo("Stop, Blue lane = True")
                 if self.ducks:
+                    rospy.loginfo("Sleep, Ducks = True")
                     rospy.sleep(1)
                 else:
-                    rospy.sleep(1)
+                    rospy.loginfo("Sleep, Blue lane = Change")
+                    rospy.sleep(2)
                     self.move_straight()
                     self.blue_lane = False
             # rate.sleep()
